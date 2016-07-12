@@ -6,7 +6,7 @@ var Soap = require('soap');
 var SoapCookie = require('soap-cookie');
 var parseString = require('xml2js').parseString;
 
-var api_method, api_uri, api_userId, api_pass, api_ssl;
+var api_method, api_uri, api_ssl;
 var api_wsdl_endpoint = "/Cher" + "wellService/?WSDL";
 var loggedin = false;
 var client = false;
@@ -28,6 +28,14 @@ function isNumber(num) {
   if (parseInt(num, 10).toString() === num) { return true; }
 
   return false;
+}
+
+function parseFieldObject(arr) {
+  var z, hash = {};
+  for (z = 0; z < arr.length; z += 1) {
+    hash[arr[z].$.Name] = arr[z]['_'];
+  }
+  return hash;
 }
 
 function keepalive() {
@@ -80,6 +88,9 @@ exports.connect = function (args, callback) {
         if (keepalives && !err) { setTimeout(keepalive, keepAliveMS); }
         return callback(err, result);
       });
+    } else {
+      warning = 'not logged in, must specify userId and password';
+      return callback(error, null);
     }
   });
 
@@ -93,30 +104,27 @@ exports.connected = function () {
 };
 
 exports.error = function () {
-  if (error) { return error; }
+  if (error) { return "error: " + error; }
+  if (warning) { return "warning: " + warning; }
   return false;
 };
 
 exports.Login = function (args, callback) {
 
   // username required
-  if (args.userId) {
-    api_userId = args.userId;
-  } else if (!api_userId) { error = 'object must contain userId key value'; return false; }
+  if (!args.userId) { error = 'object must contain userId key value'; return false; }
 
   // password required
-  if (args.password) {
-    api_pass = args.password;
-  } else if (!api_pass) { error = 'object must contain password key value'; return false; }
+  if (!args.password) { error = 'object must contain password key value'; return false; }
 
-  //console.log("userId:", api_userId);
-  //console.log("password:", api_pass);
+  //console.log("userId:", args.userId);
+  //console.log("password:", args.password);
 
   // soap client and disconnected state required
   if (!client) { error = 'client has not been created'; return false; }
   if (loggedin) { error = 'not logged in'; return false; }
 
-  var loginargs = { "userId": api_userId, "password": api_pass };
+  var loginargs = { "userId": args.userId, "password": args.password };
   client.Login(loginargs, function (err, result) {
     if (err) { error = "Soap Login error: " + err; return callback(err, result); }
 
@@ -137,6 +145,7 @@ exports.Login = function (args, callback) {
 };
 
 exports.GetBusinessObjectByPublicId = function (args, callback) {
+  var hash = null;
 
   if (!loggedin) { return false; }
   if (typeof args === 'string') { args = { "busObPublicId": args }; }
@@ -146,12 +155,16 @@ exports.GetBusinessObjectByPublicId = function (args, callback) {
   client.GetBusinessObjectByPublicId(args, function (err, result) {
     if (result && result.GetBusinessObjectByPublicIdResult) {
       parseString(result.GetBusinessObjectByPublicIdResult, function (er, res) {
-        // console.log(res);
+        if (!res || !res.BusinessObject) { return callback(er, res); }
+        var bo = res.BusinessObject;
+        if (!bo.FieldList || !bo.FieldList[0] || !bo.FieldList[0].Field) { return callback(er, res); }
+        hash = parseFieldObject(bo.FieldList[0].Field);
+        if (hash) { return callback(er, hash); }
         return callback(er, res);
       });
       return true;
     }
-    
+
     return callback(err, result);
   });
 
